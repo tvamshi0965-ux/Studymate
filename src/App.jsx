@@ -46,6 +46,128 @@ const TINTS = [
   "from-amber-400 to-rose-500",
   "from-indigo-500 to-sky-400",
 ];
+const CREATE_FIELDS = {
+  course: [
+    { name: "name", label: "Course name", type: "text", required: true },
+    {
+      name: "college",
+      label: "College",
+      type: "select",
+      options: "colleges",
+      optionLabel: (item) => item.name,
+      required: true,
+    },
+    { name: "course_type", label: "Course type", type: "text" },
+    {
+      name: "duration_years",
+      label: "Duration in years",
+      type: "number",
+      min: 1,
+      required: true,
+    },
+  ],
+  branch: [
+    { name: "name", label: "Branch name", type: "text", required: true },
+    {
+      name: "course",
+      label: "Course",
+      type: "select",
+      options: "courses",
+      optionLabel: (item) => item.name,
+      required: true,
+    },
+  ],
+  student: [
+    { name: "student_id", label: "Student ID", type: "text", required: true },
+    { name: "full_name", label: "Full name", type: "text", required: true },
+    { name: "roll_number", label: "Roll number", type: "text", required: true },
+    { name: "email", label: "Email", type: "email" },
+    {
+      name: "section",
+      label: "Section",
+      type: "select",
+      options: "sections",
+      optionLabel: (item) => `Section ${item.id} - ${item.name}`,
+      required: true,
+    },
+    {
+      name: "password",
+      label: "Temporary password",
+      type: "password",
+      minLength: 8,
+      required: true,
+    },
+    { name: "dob", label: "Date of birth", type: "date" },
+    {
+      name: "admission_year",
+      label: "Admission year",
+      type: "number",
+      min: 1900,
+    },
+  ],
+  subject: [
+    { name: "code", label: "Subject code", type: "text", required: true },
+    { name: "name", label: "Subject name", type: "text", required: true },
+    {
+      name: "branch",
+      label: "Branch",
+      type: "select",
+      options: "branches",
+      optionLabel: (item) => item.name,
+      required: true,
+    },
+    {
+      name: "semester",
+      label: "Semester",
+      type: "select",
+      options: "semesters",
+      optionLabel: (item) => `Semester ${item.number}`,
+      required: true,
+    },
+  ],
+  note: [
+    { name: "title", label: "Title", type: "text", required: true },
+    {
+      name: "kind",
+      label: "Type",
+      type: "select",
+      choices: [
+        { value: "NOTES", label: "Notes" },
+        { value: "MATERIAL", label: "Study material" },
+        { value: "IMPQ", label: "Important questions" },
+        { value: "PAPER", label: "Previous paper" },
+        { value: "ASSIGN", label: "Assignment" },
+        { value: "INTERVIEW", label: "Interview prep" },
+      ],
+      required: true,
+    },
+    {
+      name: "section",
+      label: "Section",
+      type: "select",
+      options: "sections",
+      optionLabel: (item) => `Section ${item.id} - ${item.name}`,
+      required: true,
+    },
+    {
+      name: "subject",
+      label: "Subject",
+      type: "select",
+      options: "subjects",
+      optionLabel: (item) => `${item.code} - ${item.name}`,
+      required: true,
+    },
+    { name: "file", label: "File", type: "file", required: true },
+  ],
+};
+const CREATE_LOOKUPS = {
+  colleges: "/colleges/",
+  courses: "/courses/",
+  branches: "/branches/",
+  sections: "/sections/",
+  subjects: "/subjects/",
+  semesters: "/semesters/",
+};
 
 function Login() {
   const nav = useNavigate();
@@ -161,9 +283,12 @@ function ListPage({ title, path, cols, createType }) {
   const [err, setErr] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
+  const [editingFaculty, setEditingFaculty] = useState(null);
   const [saving, setSaving] = useState(false);
   const [createErr, setCreateErr] = useState("");
   const [collegeErr, setCollegeErr] = useState("");
+  const [lookupData, setLookupData] = useState({});
+  const [lookupErr, setLookupErr] = useState("");
   const [notice, setNotice] = useState("");
   const [colleges, setColleges] = useState([]);
   const [form, setForm] = useState({
@@ -184,6 +309,7 @@ function ListPage({ title, path, cols, createType }) {
     website: "",
     established: "",
   });
+  const [resourceForm, setResourceForm] = useState({});
   useEffect(() => {
     let active = true;
     api(
@@ -216,15 +342,42 @@ function ListPage({ title, path, cols, createType }) {
       active = false;
     };
   }, [createType]);
+  useEffect(() => {
+    const fields = CREATE_FIELDS[createType] ?? [];
+    const keys = [...new Set(fields.flatMap((field) => field.options ?? []))];
+    if (keys.length === 0) return;
+    let active = true;
+    Promise.all(
+      keys.map(async (key) => {
+        const data = await api(CREATE_LOOKUPS[key]);
+        return [key, data.results ?? data];
+      }),
+    )
+      .then((entries) => {
+        if (active) {
+          setLookupData(Object.fromEntries(entries));
+          setLookupErr("");
+        }
+      })
+      .catch((e) => {
+        if (active) setLookupErr(e.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [createType]);
   const submitFaculty = async (e) => {
     e.preventDefault();
     setSaving(true);
     setCreateErr("");
     setNotice("");
+    const isEditing = Boolean(editingFaculty);
+    const body = { ...form, college: Number(form.college) };
+    if (isEditing && !body.password) delete body.password;
     try {
-      await api(path, {
-        method: "POST",
-        body: { ...form, college: Number(form.college) },
+      await api(isEditing ? `${path}${editingFaculty.id}/` : path, {
+        method: isEditing ? "PATCH" : "POST",
+        body,
       });
       setForm({
         faculty_id: "",
@@ -234,9 +387,46 @@ function ListPage({ title, path, cols, createType }) {
         college: "",
         password: "",
       });
+      setEditingFaculty(null);
       setFormOpen(false);
       setRefreshKey((key) => key + 1);
-      setNotice("Faculty profile added.");
+      setNotice(
+        isEditing ? "Faculty profile updated." : "Faculty profile added.",
+      );
+    } catch (e) {
+      setCreateErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const editFaculty = (faculty) => {
+    setEditingFaculty(faculty);
+    setForm({
+      faculty_id: faculty.faculty_id,
+      full_name: faculty.full_name,
+      email: faculty.email,
+      designation: faculty.designation ?? "",
+      college: String(faculty.college),
+      password: "",
+    });
+    setCreateErr("");
+    setNotice("");
+    setFormOpen(true);
+  };
+  const deleteFaculty = async (faculty) => {
+    if (
+      !window.confirm(
+        `Delete ${faculty.full_name}'s faculty profile and login?`,
+      )
+    )
+      return;
+    setSaving(true);
+    setCreateErr("");
+    setNotice("");
+    try {
+      await api(`${path}${faculty.id}/`, { method: "DELETE" });
+      setRefreshKey((key) => key + 1);
+      setNotice("Faculty profile deleted.");
     } catch (e) {
       setCreateErr(e.message);
     } finally {
@@ -277,6 +467,41 @@ function ListPage({ title, path, cols, createType }) {
       setSaving(false);
     }
   };
+  const submitResource = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setCreateErr("");
+    setNotice("");
+    const fields = CREATE_FIELDS[createType];
+    try {
+      let body;
+      if (createType === "note") {
+        body = new FormData();
+        fields.forEach((field) => {
+          const value = resourceForm[field.name];
+          if (value === undefined || value === "") return;
+          body.append(field.name, field.options ? Number(value) : value);
+        });
+      } else {
+        body = {};
+        fields.forEach((field) => {
+          const value = resourceForm[field.name];
+          if (value === undefined || (value === "" && !field.required)) return;
+          body[field.name] =
+            field.type === "number" || field.options ? Number(value) : value;
+        });
+      }
+      await api(path, { method: "POST", body });
+      setResourceForm({});
+      setFormOpen(false);
+      setRefreshKey((key) => key + 1);
+      setNotice(`${createType[0].toUpperCase()}${createType.slice(1)} added.`);
+    } catch (e) {
+      setCreateErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -292,7 +517,21 @@ function ListPage({ title, path, cols, createType }) {
             <button
               type="button"
               onClick={() => {
-                setFormOpen(!formOpen);
+                if (formOpen) {
+                  setFormOpen(false);
+                  setEditingFaculty(null);
+                } else {
+                  setFormOpen(true);
+                  setEditingFaculty(null);
+                  setForm({
+                    faculty_id: "",
+                    full_name: "",
+                    email: "",
+                    designation: "",
+                    college: "",
+                    password: "",
+                  });
+                }
                 setCreateErr("");
               }}
               className="rounded-xl bg-violet-700 px-4 py-2 font-semibold text-white hover:bg-violet-800"
@@ -483,9 +722,11 @@ function ListPage({ title, path, cols, createType }) {
               </select>
             </label>
             <label className="grid gap-1 text-sm font-medium">
-              Temporary password
+              {editingFaculty
+                ? "New password (optional)"
+                : "Temporary password"}
               <input
-                required
+                required={!editingFaculty}
                 type="password"
                 minLength={8}
                 autoComplete="new-password"
@@ -509,7 +750,105 @@ function ListPage({ title, path, cols, createType }) {
             disabled={saving || colleges.length === 0}
             className="mt-4 rounded-xl bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
           >
-            {saving ? "Adding…" : "Create faculty profile"}
+            {saving
+              ? "Saving…"
+              : editingFaculty
+                ? "Save changes"
+                : "Create faculty profile"}
+          </button>
+        </form>
+      )}
+      {formOpen && CREATE_FIELDS[createType] && (
+        <form
+          onSubmit={submitResource}
+          className="mb-5 rounded-2xl border bg-white p-5 shadow-sm dark:bg-slate-800"
+        >
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {CREATE_FIELDS[createType].map((field) => (
+              <label
+                key={field.name}
+                className="grid gap-1 text-sm font-medium"
+              >
+                {field.label}
+                {field.type === "select" ? (
+                  <select
+                    required={field.required}
+                    value={resourceForm[field.name] ?? ""}
+                    onChange={(e) =>
+                      setResourceForm({
+                        ...resourceForm,
+                        [field.name]: e.target.value,
+                      })
+                    }
+                    className="rounded-xl border px-3 py-2 dark:bg-slate-900"
+                  >
+                    <option value="">Select {field.label.toLowerCase()}</option>
+                    {(field.choices ?? lookupData[field.options] ?? []).map(
+                      (item) => {
+                        const value = field.choices ? item.value : item.id;
+                        const label = field.choices
+                          ? item.label
+                          : field.optionLabel(item);
+                        return (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        );
+                      },
+                    )}
+                  </select>
+                ) : (
+                  <input
+                    required={field.required}
+                    type={field.type}
+                    min={field.min}
+                    minLength={field.minLength}
+                    autoComplete={
+                      field.type === "password" ? "new-password" : undefined
+                    }
+                    value={
+                      field.type === "file"
+                        ? undefined
+                        : (resourceForm[field.name] ?? "")
+                    }
+                    onChange={(e) =>
+                      setResourceForm({
+                        ...resourceForm,
+                        [field.name]:
+                          field.type === "file"
+                            ? (e.target.files?.[0] ?? "")
+                            : e.target.value,
+                      })
+                    }
+                    className="rounded-xl border px-3 py-2 dark:bg-slate-900"
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+          {lookupErr && (
+            <p role="alert" className="mt-3 text-sm text-rose-600">
+              Could not load form options: {lookupErr}
+            </p>
+          )}
+          {createErr && (
+            <p role="alert" className="mt-3 text-sm text-rose-600">
+              {createErr}
+            </p>
+          )}
+          <button
+            disabled={
+              saving ||
+              CREATE_FIELDS[createType].some(
+                (field) =>
+                  field.required &&
+                  field.options &&
+                  !lookupData[field.options]?.length,
+              )
+            }
+            className="mt-4 rounded-xl bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"
+          >
+            {saving ? "Adding…" : `Create ${createType}`}
           </button>
         </form>
       )}
@@ -534,6 +873,7 @@ function ListPage({ title, path, cols, createType }) {
                     {c.replace("_", " ")}
                   </th>
                 ))}
+                {createType === "faculty" && <th className="p-3">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -547,6 +887,27 @@ function ListPage({ title, path, cols, createType }) {
                       {String(r[c] ?? "")}
                     </td>
                   ))}
+                  {createType === "faculty" && (
+                    <td className="p-3">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => editFaculty(r)}
+                          className="rounded-lg border px-3 py-1 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-700"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => deleteFaculty(r)}
+                          className="rounded-lg border border-rose-300 px-3 py-1 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:hover:bg-rose-950"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -570,7 +931,15 @@ const PAGES = {
   Ideas: ["/ideas/", ["title", "category", "status"]],
   Notifications: ["/notifications/", ["category", "title", "is_read"]],
 };
-const CREATE_TYPES = { Colleges: "college", Faculty: "faculty" };
+const CREATE_TYPES = {
+  Colleges: "college",
+  Courses: "course",
+  Branches: "branch",
+  Faculty: "faculty",
+  Students: "student",
+  Subjects: "subject",
+  Notes: "note",
+};
 
 function Shell({ role }) {
   const a = auth.get();
